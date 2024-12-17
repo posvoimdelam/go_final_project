@@ -31,7 +31,6 @@ func TestTask(t *testing.T) {
 	var m map[string]string
 	err = json.Unmarshal(body, &m)
 	assert.NoError(t, err)
-
 	e, ok := m["error"]
 	assert.False(t, !ok || len(fmt.Sprint(e)) == 0,
 		"Ожидается ошибка для вызова /api/task")
