@@ -2,7 +2,7 @@ package db
 
 import (
 	"database/sql"
-	"fmt"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,7 +10,7 @@ import (
 
 const defaultDBFile = "scheduler.db"
 
-func DatabasePath() string {
+func DatabasePath() string { //возвращает путь до файла базы данных
 	dbPath := os.Getenv("TODO_DBFILE")
 	if dbPath == "" {
 		appPath, err := os.Executable()
@@ -23,59 +23,36 @@ func DatabasePath() string {
 	return dbPath
 }
 
-func DbInit(dbPath string) *sql.DB {
+func DbInit(dbPath string) *sql.DB { //инициализирует и подключается к базе данных
 
 	_, err := os.Stat(dbPath)
-	install := os.IsNotExist(err)
+	if errors.Is(err, os.ErrNotExist) {
+		log.Println("Database doesn't exist, creating ...")
+	}
 
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Printf("Failed to connect to database: %v", err)
 	}
 
-	if install {
-		log.Println("Database doesn't exist, creating ...")
-		createTable(db)
-	} else {
-		if err = ifTableExists(db); err != nil {
-			log.Fatalf("Database initialized but table 'scheduler doesn't exist':%v", err)
-		}
-	}
+	createTable(db)
+
 	return db
 }
 
 func createTable(db *sql.DB) { //создает таблицу scheduler
 	query := `
-	CREATE TABLE scheduler (
+	CREATE TABLE IF NOT EXISTS scheduler (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	date TEXT NOT NULL,
+	date VARCHAR(8) NOT NULL,
 	title TEXT NOT NULL,
 	comment TEXT NOT NULL,
-	repeat TEXT
+	repeat VARCHAR(128)
 	);
-	CREATE INDEX index_date ON scheduler(date);
+	CREATE INDEX IF NOT EXISTS index_date ON scheduler(date);
 	`
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Fatalf("Failed to create table: %v", err)
 	}
-	log.Print("Table and index are created")
-}
-
-func ifTableExists(db *sql.DB) error { //проверяет существует ли таблица scheduler в базе данных
-	query := `
-	SELECT name 
-	FROM sqlite_master
-	WHERE type='table'
-	AND name='scheduler' 
-	`
-	var name string
-	err := db.QueryRow(query).Scan(&name)
-	if err != nil {
-		return fmt.Errorf("can't scan: %v", err)
-	}
-	if name != "scheduler" {
-		return fmt.Errorf("table 'scheduler' doesn't exist:%v", err)
-	}
-	return nil
 }

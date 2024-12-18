@@ -1,7 +1,8 @@
-package utils
+package dates
 
 import (
 	"fmt"
+	"go_final_project/models"
 	"math"
 	"sort"
 	"strconv"
@@ -11,7 +12,7 @@ import (
 
 func NextDate(now time.Time, date string, repeat string) (string, error) {
 
-	start, err := time.Parse("20060102", date)
+	start, err := time.Parse(models.Layout, date)
 	if err != nil {
 		return "", fmt.Errorf("invalid date format:%v", err)
 	}
@@ -35,7 +36,7 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 		for i := 0; i < 1000; i++ {
 			start = start.AddDate(0, 0, days)
 			if start.After(now) {
-				return start.Format("20060102"), nil
+				return start.Format(models.Layout), nil
 			}
 		}
 		return "", fmt.Errorf("exceeded iteration limit while calculating the next date")
@@ -47,7 +48,7 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 		for {
 			start = start.AddDate(1, 0, 0)
 			if start.After(now) {
-				return start.Format("20060102"), nil
+				return start.Format(models.Layout), nil
 			}
 		}
 
@@ -63,7 +64,7 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 			}
 		}
 		next := now.AddDate(0, 0, daysToAdd(now, daysOfWeek))
-		return next.Format("20060102"), nil
+		return next.Format(models.Layout), nil
 	case "m":
 		if len(fields) > 3 || len(fields) < 2 || fields[1] == "" {
 			return "", fmt.Errorf("invalid monthly rule")
@@ -148,7 +149,7 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 			})
 
 			if len(nextDates) > 0 {
-				return nextDates[0].Format("20060102"), nil
+				return nextDates[0].Format(models.Layout), nil
 			}
 		} else { //если в правилах только дни
 			closestToStart := ifOnlyDays(date, days)
@@ -156,7 +157,7 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 				nextMonth := start.AddDate(0, 1, 0)                                                                                 //добавляется месяц и
 				closestToStart = time.Date(nextMonth.Year(), nextMonth.Month(), minimalDate(days, nextMonth), 0, 0, 0, 0, time.UTC) //формируется минимальная дата в новом месяце, ведь она будет ближе всего к date
 			}
-			return closestAfterNow(days, now, closestToStart).Format("20060102"), nil
+			return closestAfterNow(days, now, closestToStart).Format(models.Layout), nil
 		}
 
 	default:
@@ -240,7 +241,7 @@ func minimalDate(days []int, nextMonth time.Time) int { //возвращает �
 }
 
 func ifOnlyDays(date string, days []int) time.Time { //возвращает ближайшую дату из правил после date, но только в рамках месяца date
-	start, _ := time.Parse("20060102", date)
+	start, _ := time.Parse(models.Layout, date)
 
 	var dates []time.Time
 

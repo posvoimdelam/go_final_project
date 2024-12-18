@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go_final_project/models"
-	"go_final_project/utils"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
+
+	"go_final_project/dates"
+	"go_final_project/models"
 )
+
+const limit = 50
 
 func DeleteTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if r.Method != http.MethodDelete {
@@ -52,7 +56,7 @@ func DoneTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	//получаем id
 	id := r.URL.Query().Get("id")
 	//делается запрос в базу данных по id
-	row := db.QueryRow("SELECT * FROM scheduler WHERE id=?", id)
+	row := db.QueryRow("SELECT id, date, title, comment, repeat FROM scheduler WHERE id=?", id)
 	//запись данных строки в структуру
 	var task models.Task
 	err := row.Scan(&task.Id, &task.Date, &task.Title, &task.Comment, &task.Repeat)
@@ -89,7 +93,7 @@ func DoneTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			return
 		}
 
-		nextDate, err := utils.NextDate(now, task.Date, task.Repeat)
+		nextDate, err := dates.NextDate(now, task.Date, task.Repeat)
 		if err != nil {
 			writeErrorResponse(w, fmt.Sprintf("can't find next date: %v", err), http.StatusBadRequest)
 			return
@@ -154,7 +158,7 @@ func UpdateTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if task.Date == "" {
 		taskDate = today
 	} else {
-		taskDate, err = time.Parse("20060102", task.Date)
+		taskDate, err = time.Parse(models.Layout, task.Date)
 		if err != nil {
 			writeErrorResponse(w, "invalid date format", http.StatusBadRequest)
 			return
@@ -165,12 +169,12 @@ func UpdateTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		if task.Repeat == "" {
 			taskDate = today
 		} else {
-			nextDate, err := utils.NextDate(today, taskDate.Format("20060102"), task.Repeat)
+			nextDate, err := dates.NextDate(today, taskDate.Format(models.Layout), task.Repeat)
 			if err != nil {
 				writeErrorResponse(w, fmt.Sprintf("can't find next date: %v", err), http.StatusBadRequest)
 				return
 			}
-			taskDate, err = time.Parse("20060102", nextDate)
+			taskDate, err = time.Parse(models.Layout, nextDate)
 			if err != nil {
 				writeErrorResponse(w, "invalid date format", http.StatusBadRequest)
 				return
@@ -178,7 +182,7 @@ func UpdateTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 	}
 
-	result, err := db.Exec("UPDATE scheduler SET date=?, title=?, comment=?, repeat=? WHERE id=?", taskDate.Format("20060102"), task.Title, task.Comment, task.Repeat, id)
+	result, err := db.Exec("UPDATE scheduler SET date=?, title=?, comment=?, repeat=? WHERE id=?", taskDate.Format(models.Layout), task.Title, task.Comment, task.Repeat, id)
 	if err != nil {
 		writeErrorResponse(w, fmt.Sprintf("error updating table: %v", err), http.StatusInternalServerError)
 		return
@@ -216,7 +220,7 @@ func GetTaskByIdHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	var task models.Task
-	err := db.QueryRow("SELECT * FROM scheduler WHERE id=?", id).Scan(&task.Id, &task.Date, &task.Title, &task.Comment, &task.Repeat)
+	err := db.QueryRow("SELECT id, date, title, comment, repeat FROM scheduler WHERE id=?", id).Scan(&task.Id, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeErrorResponse(w, "no such row", http.StatusNotFound)
@@ -247,21 +251,21 @@ func GetTasksHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var args []interface{}
 
 	if search == "" {
-		query = "SELECT * FROM scheduler ORDER BY date LIMIT ?"
-		args = append(args, 50)
+		query = "SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date LIMIT ?"
+		args = append(args, limit)
 	} else if isValidDate(search) {
 		date, err := time.Parse("02.01.2006", search)
 		if err != nil {
 			writeErrorResponse(w, "invalid date format in search", http.StatusBadRequest)
 			return
 		}
-		formatedDate := date.Format("20060102")
-		query = "SELECT * FROM scheduler WHERE date = ? LIMIT ?"
-		args = append(args, formatedDate, 50)
+		formatedDate := date.Format(models.Layout)
+		query = "SELECT id, date, title, comment, repeat FROM scheduler WHERE date = ? LIMIT ?"
+		args = append(args, formatedDate, limit)
 	} else {
 		like := "%" + search + "%"
-		query = "SELECT * FROM scheduler WHERE title LIKE ? OR comment LIKE ? ORDER BY date LIMIT ?"
-		args = append(args, like, like, 50)
+		query = "SELECT id, date, title, comment, repeat FROM scheduler WHERE title LIKE ? OR comment LIKE ? ORDER BY date LIMIT ?"
+		args = append(args, like, like, limit)
 	}
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -280,6 +284,13 @@ func GetTasksHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 
 		tasks = append(tasks, task)
+	}
+	if err = rows.Err(); err != nil {
+		writeErrorResponse(w, fmt.Sprintf("loop terminated with error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err = rows.Close(); err != nil {
+		log.Println(err)
 	}
 
 	if tasks == nil {
@@ -320,7 +331,7 @@ func AddTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if task.Date == "" {
 		taskDate = today
 	} else {
-		taskDate, err = time.Parse("20060102", task.Date)
+		taskDate, err = time.Parse(models.Layout, task.Date)
 		if err != nil {
 			writeErrorResponse(w, "invalid date format", http.StatusBadRequest)
 			return
@@ -333,12 +344,12 @@ func AddTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		if task.Repeat == "" {
 			taskDate = today
 		} else {
-			nextDate, err := utils.NextDate(today, taskDate.Format("20060102"), task.Repeat)
+			nextDate, err := dates.NextDate(today, taskDate.Format(models.Layout), task.Repeat)
 			if err != nil {
 				writeErrorResponse(w, fmt.Sprintf("can't find next date: %v", err), http.StatusBadRequest)
 				return
 			}
-			taskDate, err = time.Parse("20060102", nextDate)
+			taskDate, err = time.Parse(models.Layout, nextDate)
 			if err != nil {
 				writeErrorResponse(w, "invalid date format", http.StatusBadRequest)
 				return
@@ -346,7 +357,7 @@ func AddTaskHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 	}
 	query := "INSERT INTO scheduler (date, title, comment, repeat) VALUES (?, ?, ?, ?)"
-	res, err := db.Exec(query, taskDate.Format("20060102"), task.Title, task.Comment, task.Repeat)
+	res, err := db.Exec(query, taskDate.Format(models.Layout), task.Title, task.Comment, task.Repeat)
 	if err != nil {
 		writeErrorResponse(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
 		return
@@ -380,12 +391,12 @@ func ApiNextDateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t, err := time.Parse("20060102", now)
+	t, err := time.Parse(models.Layout, now)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Invalid 'now' parameter: %v", err), http.StatusBadRequest)
 		return
 	}
-	nextDate, err := utils.NextDate(t, date, repeat)
+	nextDate, err := dates.NextDate(t, date, repeat)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error calculating next date: %v", err), http.StatusBadRequest)
 		return

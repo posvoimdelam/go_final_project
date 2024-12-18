@@ -2,14 +2,15 @@ package main
 
 import (
 	"database/sql"
-	dba "go_final_project/dba"
-	"go_final_project/handlers"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
+
+	dba "go_final_project/dba"
+	"go_final_project/handlers"
 )
 
 const webDir = "./web"
