@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"strconv"
@@ -144,7 +143,6 @@ func TestAddTask(t *testing.T) {
 			assert.Equal(t, v.title, task.Title)
 			assert.Equal(t, v.comment, task.Comment)
 			assert.Equal(t, v.repeat, task.Repeat)
-			log.Print(task.Date)
 			if task.Date < now.Format(`20060102`) {
 				t.Errorf("Дата не может быть меньше сегодняшней %v", v)
 				continue

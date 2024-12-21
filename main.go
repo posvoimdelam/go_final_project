@@ -11,6 +11,7 @@ import (
 
 	dba "go_final_project/dba"
 	"go_final_project/handlers"
+	"go_final_project/service"
 )
 
 const webDir = "./web"
@@ -35,23 +36,26 @@ func main() {
 
 	http.Handle("/", http.FileServer(http.Dir(webDir))) //регистрация маршрута "/", создание файл-сервера для директории webDir
 
+	service := service.NewTaskService(db)
+	handler := handlers.NewTaskHandler(service)
+
 	http.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handlers.GetTaskByIdHandler(w, r, db)
+			handler.GetTaskByIdHandler(w, r)
 		case http.MethodPost:
-			handlers.AddTaskHandler(w, r, db)
+			handler.AddTaskHandler(w, r)
 		case http.MethodPut:
-			handlers.UpdateTaskHandler(w, r, db)
+			handler.UpdateTaskHandler(w, r)
 		case http.MethodDelete:
-			handlers.DeleteTaskHandler(w, r, db)
+			handler.DeleteTaskHandler(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 	http.HandleFunc("/api/nextdate", handlers.ApiNextDateHandler)
-	http.HandleFunc("/api/task/done", func(w http.ResponseWriter, r *http.Request) { handlers.DoneTaskHandler(w, r, db) })
-	http.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) { handlers.GetTasksHandler(w, r, db) })
+	http.HandleFunc("/api/task/done", func(w http.ResponseWriter, r *http.Request) { handler.DoneTaskHandler(w, r) })
+	http.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) { handler.GetTasksHandler(w, r) })
 
 	log.Printf("Starting server on port %s, directory: %s\n", port, webDir)
 	err := http.ListenAndServe(":"+port, nil)
