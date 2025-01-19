@@ -2,7 +2,6 @@ package service
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,23 +9,23 @@ import (
 
 	"go_final_project/dates"
 	"go_final_project/models"
+	"go_final_project/repo"
 )
 
-const limit = 50
-
 type TaskService struct {
-	db *sql.DB
+	repo *repo.TaskRepository
 }
 
-func NewTaskService(db *sql.DB) *TaskService {
-	return &TaskService{db: db}
+func NewTaskService(repo *repo.TaskRepository) *TaskService {
+	return &TaskService{repo: repo}
 }
 
 func (s *TaskService) DeleteTask(id string) (int, error) {
-	res, err := s.db.Exec("DELETE FROM scheduler WHERE id=?", id)
+	res, statusCode, err := s.repo.DeleteById(id)
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("error executing delete: %v", err)
+		return statusCode, err
 	}
+
 	if statusCode, err := checkRowsAffected(res); err != nil {
 		return statusCode, err
 	}
@@ -34,23 +33,17 @@ func (s *TaskService) DeleteTask(id string) (int, error) {
 }
 
 func (s *TaskService) DoneTask(id string) (int, error) {
-	//делается запрос в базу данных по id
-	row := s.db.QueryRow("SELECT id, date, title, comment, repeat FROM scheduler WHERE id=?", id)
-	//запись данных строки в структуру
-	var task models.Task
-	err := row.Scan(&task.Id, &task.Date, &task.Title, &task.Comment, &task.Repeat)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return http.StatusNotFound, fmt.Errorf("no such row: %v", err)
-		} else {
-			return http.StatusInternalServerError, fmt.Errorf("error scanning row: %v", err)
-		}
+
+	task, statusCode, err := s.repo.GetTaskById(id)
+	if err != nil || task == nil {
+		return statusCode, err
 	}
+
 	//если поле repeat пустое то запись удаляется, если нет то рассчитывается следующая дата и в таблице обновляется date
 	if task.Repeat == "" {
-		res, err := s.db.Exec("DELETE FROM scheduler WHERE id=?", id)
+		res, statusCode, err := s.repo.DeleteById(id)
 		if err != nil {
-			return http.StatusInternalServerError, fmt.Errorf("error executing delete: %v", err)
+			return statusCode, err
 		}
 		if statusCode, err := checkRowsAffected(res); err != nil {
 			return statusCode, err
@@ -60,13 +53,19 @@ func (s *TaskService) DoneTask(id string) (int, error) {
 		if task.Date == "" {
 			return http.StatusBadRequest, fmt.Errorf("empty date")
 		}
+
 		nextDate, err := dates.NextDate(now, task.Date, task.Repeat)
 		if err != nil {
 			return http.StatusBadRequest, fmt.Errorf("can't find next date: %v", err)
 		}
-		res, err := s.db.Exec("UPDATE scheduler SET date=?", nextDate)
+
+		updates := map[string]any{
+			"date": nextDate,
+		}
+
+		res, statusCode, err := s.repo.UpdateById(id, updates)
 		if err != nil {
-			return http.StatusInternalServerError, fmt.Errorf("error executing update: %v", err)
+			return statusCode, err
 		}
 		if statusCode, err := checkRowsAffected(res); err != nil {
 			return statusCode, err
@@ -82,11 +81,11 @@ func (s *TaskService) UpdateTask(task models.Task) (int, error) {
 	if task.Title == "" {
 		return http.StatusBadRequest, fmt.Errorf("empty title")
 	}
-	var id int
+
 	if task.Id == "" {
 		return http.StatusBadRequest, fmt.Errorf("empty id")
 	} else {
-		id, err = strconv.Atoi(task.Id)
+		_, err = strconv.Atoi(task.Id)
 		if err != nil {
 			return http.StatusBadRequest, fmt.Errorf("invalid id format")
 		}
@@ -114,9 +113,16 @@ func (s *TaskService) UpdateTask(task models.Task) (int, error) {
 		}
 	}
 
-	result, err := s.db.Exec("UPDATE scheduler SET date=?, title=?, comment=?, repeat=? WHERE id=?", taskDate.Format(models.Layout), task.Title, task.Comment, task.Repeat, id)
+	updates := map[string]any{
+		"date":    taskDate.Format(models.Layout),
+		"title":   task.Title,
+		"comment": task.Comment,
+		"repeat":  task.Repeat,
+	}
+
+	result, statusCode, err := s.repo.UpdateById(task.Id, updates)
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("error updating table: %v", err)
+		return statusCode, err
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -130,62 +136,19 @@ func (s *TaskService) UpdateTask(task models.Task) (int, error) {
 	return 0, nil
 }
 
-func (s *TaskService) GetTaskById(id string) (models.Task, int, error) {
-	var task models.Task
-	err := s.db.QueryRow("SELECT id, date, title, comment, repeat FROM scheduler WHERE id=?", id).Scan(&task.Id, &task.Date, &task.Title, &task.Comment, &task.Repeat)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return models.Task{}, http.StatusNotFound, fmt.Errorf("no such row %v", sql.ErrNoRows)
-		} else {
-			return models.Task{}, http.StatusNotFound, fmt.Errorf("can't get task: %v", err)
-		}
+func (s *TaskService) GetTaskById(id string) (*models.Task, int, error) {
+	task, statusCode, err := s.repo.GetTaskById(id)
+	if err != nil || task == nil {
+		return &models.Task{}, statusCode, err
 	}
 	return task, 0, nil
 }
 
 func (s *TaskService) GetTasks(search string) (map[string][]models.Task, int, error) {
 
-	var query string
-	var args []interface{}
-
-	if search == "" {
-		query = "SELECT id, date, title, comment, repeat FROM scheduler ORDER BY date LIMIT ?"
-		args = append(args, limit)
-	} else if isValidDate(search) {
-		date, err := time.Parse("02.01.2006", search)
-		if err != nil {
-			return map[string][]models.Task{}, http.StatusBadRequest, fmt.Errorf("invalid date format in search: %v", err)
-		}
-		formatedDate := date.Format(models.Layout)
-		query = "SELECT id, date, title, comment, repeat FROM scheduler WHERE date = ? LIMIT ?"
-		args = append(args, formatedDate, limit)
-	} else {
-		like := "%" + search + "%"
-		query = "SELECT id, date, title, comment, repeat FROM scheduler WHERE title LIKE ? OR comment LIKE ? ORDER BY date LIMIT ?"
-		args = append(args, like, like, limit)
-	}
-	rows, err := s.db.Query(query, args...)
+	tasks, statusCode, err := s.repo.GetTasks(search)
 	if err != nil {
-		return map[string][]models.Task{}, http.StatusInternalServerError, fmt.Errorf("can't make query: %v", err)
-	}
-	defer rows.Close()
-
-	var task models.Task
-	var tasks []models.Task
-	for rows.Next() {
-		err := rows.Scan(&task.Id, &task.Date, &task.Title, &task.Comment, &task.Repeat)
-		if err != nil {
-			return map[string][]models.Task{}, http.StatusInternalServerError, fmt.Errorf("can't get rows: %v", err)
-		}
-		tasks = append(tasks, task)
-	}
-
-	if err = rows.Err(); err != nil {
-		return map[string][]models.Task{}, http.StatusInternalServerError, fmt.Errorf("loop terminated with error: %v", err)
-	}
-
-	if tasks == nil {
-		tasks = []models.Task{}
+		return map[string][]models.Task{}, statusCode, err
 	}
 
 	return map[string][]models.Task{"tasks": tasks}, 0, nil
@@ -233,15 +196,9 @@ func (s *TaskService) AddTask(task models.Task) (int64, int, error) {
 		}
 	}
 
-	query := "INSERT INTO scheduler (date, title, comment, repeat) VALUES (?, ?, ?, ?)"
-	res, err := s.db.Exec(query, taskDate.Format(models.Layout), task.Title, task.Comment, task.Repeat)
+	id, statusCode, err := s.repo.AddTaskAndGetId(taskDate, task)
 	if err != nil {
-		return 0, http.StatusInternalServerError, fmt.Errorf("database error: %v", err)
-	}
-
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, http.StatusInternalServerError, fmt.Errorf("error getting id: %v", err)
+		return 0, statusCode, err
 	}
 
 	return id, 0, nil
@@ -258,11 +215,6 @@ func ApiNextDate(now string, date string, repeat string) (string, int, string) {
 		return "", http.StatusBadRequest, fmt.Sprintf("Error calculating next date: %v", err)
 	}
 	return nextDate, 0, ""
-}
-
-func isValidDate(date string) bool {
-	_, err := time.Parse("02.01.2006", date)
-	return err == nil
 }
 
 func checkRowsAffected(res sql.Result) (int, error) {

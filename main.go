@@ -11,6 +11,7 @@ import (
 
 	dba "go_final_project/dba"
 	"go_final_project/handlers"
+	"go_final_project/repo"
 	"go_final_project/service"
 )
 
@@ -36,7 +37,8 @@ func main() {
 
 	http.Handle("/", http.FileServer(http.Dir(webDir))) //регистрация маршрута "/", создание файл-сервера для директории webDir
 
-	service := service.NewTaskService(db)
+	database := repo.NewTaskRepository(db)
+	service := service.NewTaskService(database)
 	handler := handlers.NewTaskHandler(service)
 
 	http.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
